@@ -1,0 +1,46 @@
+= st - simple terminal
+chtc <notnotcha0t1c@protonmail.com>
+{docdate}
+
+My personal st build.
+
+== Requirements
+In order to build st you need the Xlib header files.
+
+== Installation
+Clone the repository and enter the directory.
+[source,shell]
+git clone https://github.com/notchtc/st
+cd st
+
+Edit config.mk to match your local setup (st is installed into
+the /usr/local namespace by default).
+
+Afterwards enter the following command to build and install st (if
+necessary as root):
+[source,shell]
+make clean install
+
+== Patches
+- https://st.suckless.org/patches/anysize/[anysize]
+- https://st.suckless.org/patches/sync/[synchronized rendering]
+- https://st.suckless.org/patches/blinking_cursor[blinking cursor]
+- https://st.suckless.org/patches/bold-is-not-bright[bold is not bright]
+- https://st.suckless.org/patches/boxdraw[boxdraw]
+- https://st.suckless.org/patches/clipboard[clipboard]
+- https://st.suckless.org/patches/copyurl[copyurl]
+- https://st.suckless.org/patches/open_copied_url[open copied url]
+- https://github.com/nimaipatel/st/blob/master/patches/7672445bab01cb4e861651dc540566ac22e25812.diff[patch_column]
+- https://st.suckless.org/patches/scrollback[scrollbar]
+- https://st.suckless.org/patches/xresources[xresources]
+
+== Running st
+If you did not install st with make clean install, you must compile
+the st terminfo entry with the following command:
+[source,shell]
+tic -sx st.info
+
+See the man page for additional details.
+
+== Credits
+Based on Aurélien APTEL <aurelien dot aptel at gmail dot com> bt source code.
