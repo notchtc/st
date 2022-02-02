@@ -2,6 +2,8 @@
 chtc <notnotcha0t1c@protonmail.com>
 {docdate}
 
+IMPORTANT:: Install https://github.com/uditkarode/libxft-bgra[libxft-bgra] and the Noto Emoji fonts to not have crashes when emojis are displayed.
+
 My personal https://st.suckless.org[st] build.
 
 == Requirements
@@ -23,15 +25,16 @@ make clean install
 
 == Patches
 - https://st.suckless.org/patches/anysize/[anysize]
-- https://st.suckless.org/patches/sync/[synchronized rendering]
 - https://st.suckless.org/patches/blinking_cursor[blinking cursor]
 - https://st.suckless.org/patches/bold-is-not-bright[bold is not bright]
 - https://st.suckless.org/patches/boxdraw[boxdraw]
 - https://st.suckless.org/patches/clipboard[clipboard]
 - https://st.suckless.org/patches/copyurl[copyurl]
+- https://st.suckless.org/patches/font2[font2]
 - https://st.suckless.org/patches/open_copied_url[open copied url]
 - https://github.com/nimaipatel/st/blob/master/patches/7672445bab01cb4e861651dc540566ac22e25812.diff[patch_column]
 - https://st.suckless.org/patches/scrollback[scrollbar]
+- https://st.suckless.org/patches/sync/[synchronized rendering]
 - https://st.suckless.org/patches/xresources[xresources]
 
 == Running st
