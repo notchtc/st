@@ -2,7 +2,7 @@
 chtc <notnotcha0t1c@protonmail.com>
 {docdate}
 
-IMPORTANT:: Install https://github.com/uditkarode/libxft-bgra[libxft-bgra] and the Noto Emoji fonts to not have crashes when emojis are displayed.
+IMPORTANT:: Install https://github.com/uditkarode/libxft-bgra[libxft-bgra] to not have crashes when emojis are displayed.
 
 My personal https://st.suckless.org[st] build.
 
