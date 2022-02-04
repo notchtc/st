@@ -21,19 +21,21 @@
 #define IS_TRUECOL(x)		(1 << 24 & (x))
 
 enum glyph_attribute {
-	ATTR_NULL       = 0,
-	ATTR_BOLD       = 1 << 0,
-	ATTR_FAINT      = 1 << 1,
-	ATTR_ITALIC     = 1 << 2,
-	ATTR_UNDERLINE  = 1 << 3,
-	ATTR_BLINK      = 1 << 4,
-	ATTR_REVERSE    = 1 << 5,
-	ATTR_INVISIBLE  = 1 << 6,
-	ATTR_STRUCK     = 1 << 7,
-	ATTR_WRAP       = 1 << 8,
-	ATTR_WIDE       = 1 << 9,
-	ATTR_WDUMMY     = 1 << 10,
-	ATTR_BOXDRAW    = 1 << 11,
+  ATTR_NULL       = 0,
+  ATTR_SET        = 1 << 0,
+	ATTR_BOLD       = 1 << 1,
+	ATTR_FAINT      = 1 << 2,
+	ATTR_ITALIC     = 1 << 3,
+	ATTR_UNDERLINE  = 1 << 4,
+	ATTR_BLINK      = 1 << 5,
+	ATTR_REVERSE    = 1 << 6,
+	ATTR_INVISIBLE  = 1 << 7,
+	ATTR_STRUCK     = 1 << 8,
+	ATTR_WRAP       = 1 << 9,
+	ATTR_WIDE       = 1 << 10,
+	ATTR_WDUMMY     = 1 << 11,
+	ATTR_SELECTED   = 1 << 12,
+	ATTR_BOXDRAW    = 1 << 13,
 	ATTR_BOLD_FAINT = ATTR_BOLD | ATTR_FAINT,
 };
 
@@ -82,7 +84,6 @@ void die(const char *, ...);
 void redraw(void);
 void draw(void);
 
-void opencopied(const Arg *);
 void kscrolldown(const Arg *);
 void kscrollup(const Arg *);
 void printscreen(const Arg *);
@@ -92,8 +93,8 @@ void toggleprinter(const Arg *);
 void copyurl(const Arg *);
 
 int tattrset(int);
-int tisaltscr(void);
 void tnew(int, int);
+int tisaltscreen(void);
 void tresize(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
