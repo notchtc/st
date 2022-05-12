@@ -44,8 +44,6 @@
 #define ISCONTROLC1(c)		(BETWEEN(c, 0x80, 0x9f))
 #define ISCONTROL(c)		(ISCONTROLC0(c) || ISCONTROLC1(c))
 #define ISDELIM(u)		(u && wcschr(worddelimiters, u))
-#define STRESCARGREST(n)	((n) == 0 ? strescseq.buf : strescseq.args[(n)-1] + 1)
-#define STRESCARGJUST(n)	(*(strescseq.args[n]) = '\0', STRESCARGREST(n))
 
 #define TLINE(y) ( \
 	(y) < term.scr ? term.hist[(term.histi + (y) - term.scr + 1 + HISTSIZE) % HISTSIZE] \
@@ -140,7 +138,7 @@ typedef struct {
 	int row;      /* nb row */
 	int col;      /* nb col */
 	Line *line;   /* screen */
- 	Line hist[HISTSIZE]; /* history buffer */
+	Line hist[HISTSIZE]; /* history buffer */
 	int histi;           /* history index */
 	int histf;           /* nb history available */
 	int scr;             /* scroll back */
@@ -182,6 +180,11 @@ typedef struct {
 	int narg;              /* nb of args */
 } STREscape;
 
+typedef struct {
+	int state;
+	size_t length;
+} URLdfa;
+
 static void execsh(char *, char **);
 static void stty(char **);
 static void sigchld(int);
@@ -191,6 +194,7 @@ static void csidump(void);
 static void csihandle(void);
 static void csiparse(void);
 static void csireset(void);
+static void osc_color_response(int, int, int);
 static int eschandle(uchar);
 static void strdump(void);
 static void strhandle(void);
@@ -241,8 +245,7 @@ static void tdefutf8(char);
 static int32_t tdefcolor(const int *, int *, int);
 static void tdeftran(char);
 static void tstrsequence(uchar);
-static void tsetcolor(int, int, int, uint32_t, uint32_t);
-static char * findlastany(char *, const char**, size_t);
+static int daddch(URLdfa *, char);
 
 static void drawregion(int, int, int, int);
 
@@ -276,6 +279,33 @@ static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
 static const Rune utfmin[UTF_SIZ + 1] = {       0,    0,  0x80,  0x800,  0x10000};
 static const Rune utfmax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
+
+#include <time.h>
+static int su = 0;
+struct timespec sutv;
+
+static void
+tsync_begin()
+{
+	clock_gettime(CLOCK_MONOTONIC, &sutv);
+	su = 1;
+}
+
+static void
+tsync_end()
+{
+	su = 0;
+}
+
+int
+tinsync(uint timeout)
+{
+	struct timespec now;
+	if (su && !clock_gettime(CLOCK_MONOTONIC, &now)
+	       && TIMEDIFF(now, sutv) >= timeout)
+		su = 0;
+	return su;
+}
 
 ssize_t
 xwrite(int fd, const char *s, size_t len)
@@ -395,25 +425,10 @@ utf8validate(Rune *u, size_t i)
 	return i;
 }
 
-static const char base64_digits[] = {
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 62, 0, 0, 0,
-	63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 0, 0, 0, -1, 0, 0, 0, 0, 1,
-	2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-	22, 23, 24, 25, 0, 0, 0, 0, 0, 0, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-	35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-};
-
 char
 base64dec_getc(const char **src)
 {
-	while (**src && !isprint(**src))
+	while (**src && !isprint((unsigned char)**src))
 		(*src)++;
 	return **src ? *((*src)++) : '=';  /* emulate padding if string ends */
 }
@@ -423,6 +438,13 @@ base64dec(const char *src)
 {
 	size_t in_len = strlen(src);
 	char *result, *dst;
+	static const char base64_digits[256] = {
+		[43] = 62, 0, 0, 0, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+		0, 0, 0, -1, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+		13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 0, 0, 0, 0,
+		0, 0, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+		40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51
+	};
 
 	if (in_len % 4)
 		in_len += 4 - (in_len % 4);
@@ -565,7 +587,7 @@ selnormalize(void)
 	selsnap(&sel.nb.x, &sel.nb.y, -1);
 	selsnap(&sel.ne.x, &sel.ne.y, +1);
 
-  /* expand selection over line breaks */
+	/* expand selection over line breaks */
 	if (sel.type == SEL_RECTANGULAR)
 		return;
 
@@ -882,7 +904,7 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 		if (s > 2)
 			close(s);
 #ifdef __OpenBSD__
-		if (pledge("stdio getpw proc", NULL) == -1)
+		if (pledge("stdio getpw proc exec", NULL) == -1)
 			die("pledge\n");
 #endif
 		execsh(cmd, args);
@@ -900,6 +922,9 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	return cmdfd;
 }
 
+static int twrite_aborted = 0;
+int ttyread_pending() { return twrite_aborted; }
+
 size_t
 ttyread(void)
 {
@@ -908,7 +933,7 @@ ttyread(void)
 	int ret, written;
 
 	/* append read bytes to unprocessed bytes */
-	ret = read(cmdfd, buf+buflen, LEN(buf)-buflen);
+	ret = twrite_aborted ? 1 : read(cmdfd, buf+buflen, LEN(buf)-buflen);
 
 	switch (ret) {
 	case 0:
@@ -916,7 +941,7 @@ ttyread(void)
 	case -1:
 		die("couldn't read from shell: %s\n", strerror(errno));
 	default:
-		buflen += ret;
+		buflen += twrite_aborted ? 0 : ret;
 		written = twrite(buf, buflen, 0);
 		buflen -= written;
 		/* keep any incomplete UTF-8 byte sequence for the next call */
@@ -1025,6 +1050,11 @@ ttyresize(int tw, int th)
 		fprintf(stderr, "Couldn't set window size: %s\n", strerror(errno));
 }
 
+int tisaltscr(void)
+{
+	return IS_SET(MODE_ALTSCREEN);
+}
+
 void
 ttyhangup()
 {
@@ -1077,7 +1107,8 @@ tsetdirtattr(int attr)
 void
 tfulldirt(void)
 {
-  for (int i = 0; i < term.row; i++)
+	tsync_end();
+	for (int i = 0; i < term.row; i++)
 		term.dirty[i] = 1;
 }
 
@@ -1311,7 +1342,6 @@ tscrollup(int top, int bot, int n, int mode)
 		tsetdirt(top+n, bot);
 	}
 
-
 	for (i = top; i <= bot-n; i++) {
 		temp = term.line[i];
 		term.line[i] = term.line[i+n];
@@ -1447,7 +1477,7 @@ tsetchar(Rune u, const Glyph *attr, int x, int y)
 	} else if (term.line[y][x].mode & ATTR_WDUMMY) {
 		term.line[y][x-1].u = ' ';
 		term.line[y][x-1].mode &= ~ATTR_WIDE;
-  }
+	}
 
 	term.dirty[y] = 1;
 	term.line[y][x] = *attr;
@@ -1499,6 +1529,7 @@ tdeletechar(int n)
 	dst = term.c.x;
 	src = MIN(term.c.x + n, term.col);
 	size = term.col - src;
+
 	if (size > 0) { /* otherwise src would point beyond the array
 	                   https://stackoverflow.com/questions/29844298 */
 		line = term.line[term.c.y];
@@ -1518,6 +1549,7 @@ tinsertblank(int n)
 	dst = MIN(term.c.x + n, term.col);
 	src = term.c.x;
 	size = term.col - dst;
+
 	if (size > 0) { /* otherwise dst would point beyond the array */
 		line = term.line[term.c.y];
 		memmove(&line[dst], &line[src], size * sizeof(Glyph));
@@ -2051,6 +2083,33 @@ csihandle(void)
 			goto unknown;
 		}
 		break;
+	case 't': /* title stack operations */
+		switch (csiescseq.arg[0]) {
+		case 22: /* pust current title on stack */
+			switch (csiescseq.arg[1]) {
+			case 0:
+			case 1:
+			case 2:
+				xpushtitle();
+				break;
+			default:
+				goto unknown;
+			}
+			break;
+		case 23: /* pop last title from stack */
+			switch (csiescseq.arg[1]) {
+			case 0:
+			case 1:
+			case 2:
+				xsettitle(NULL, 1);
+				break;
+			default:
+				goto unknown;
+			}
+			break;
+		default:
+			goto unknown;
+		}
 	}
 }
 
@@ -2085,39 +2144,28 @@ csireset(void)
 }
 
 void
-osc4_color_response(int num)
+osc_color_response(int num, int index, int is_osc4)
 {
 	int n;
 	char buf[32];
 	unsigned char r, g, b;
 
-	if (xgetcolor(num, &r, &g, &b)) {
-		fprintf(stderr, "erresc: failed to fetch osc4 color %d\n", num);
+	if (xgetcolor(is_osc4 ? num : index, &r, &g, &b)) {
+		fprintf(stderr, "erresc: failed to fetch %s color %d\n",
+		        is_osc4 ? "osc4" : "osc",
+		        is_osc4 ? num : index);
 		return;
 	}
 
-	n = snprintf(buf, sizeof buf, "\033]4;%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
-		     num, r, r, g, g, b, b);
-
-	ttywrite(buf, n, 1);
-}
-
-void
-osc_color_response(int index, int num)
-{
-	int n;
-	char buf[32];
-	unsigned char r, g, b;
-
-	if (xgetcolor(index, &r, &g, &b)) {
-		fprintf(stderr, "erresc: failed to fetch osc color %d\n", index);
-		return;
+	n = snprintf(buf, sizeof buf, "\033]%s%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
+	             is_osc4 ? "4;" : "", num, r, r, g, g, b, b);
+	if (n < 0 || n >= sizeof(buf)) {
+		fprintf(stderr, "error: %s while printing %s response\n",
+		        n < 0 ? "snprintf failed" : "truncation occurred",
+		        is_osc4 ? "osc4" : "osc");
+	} else {
+		ttywrite(buf, n, 1);
 	}
-
-	n = snprintf(buf, sizeof buf, "\033]%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
-		     num, r, r, g, g, b, b);
-
-	ttywrite(buf, n, 1);
 }
 
 void
@@ -2125,32 +2173,36 @@ strhandle(void)
 {
 	char *p = NULL, *dec;
 	int j, narg, par;
+	const struct { int idx; char *str; } osc_table[] = {
+		{ defaultfg, "foreground" },
+		{ defaultbg, "background" },
+		{ defaultcs, "cursor" }
+	};
 
 	term.esc &= ~(ESC_STR_END|ESC_STR);
-	strescseq.buf[strescseq.len] = '\0';
+	strparse();
+	par = (narg = strescseq.narg) ? atoi(strescseq.args[0]) : 0;
 
 	switch (strescseq.type) {
 	case ']': /* OSC -- Operating System Command */
-		strparse();
-		par = (narg = strescseq.narg) ? atoi(STRESCARGJUST(0)) : 0;
 		switch (par) {
 		case 0:
 			if (narg > 1) {
-				xsettitle(STRESCARGREST(1));
-				xseticontitle(STRESCARGREST(1));
+				xsettitle(strescseq.args[1], 0);
+				xseticontitle(strescseq.args[1]);
 			}
 			return;
 		case 1:
 			if (narg > 1)
-				xseticontitle(STRESCARGREST(1));
+				xseticontitle(strescseq.args[1]);
 			return;
 		case 2:
 			if (narg > 1)
-				xsettitle(STRESCARGREST(1));
+				xsettitle(strescseq.args[1], 0);
 			return;
 		case 52:
 			if (narg > 2 && allowwindowops) {
-				dec = base64dec(STRESCARGREST(1));
+				dec = base64dec(strescseq.args[2]);
 				if (dec) {
 					xsetsel(dec);
 					xclipcopy();
@@ -2160,55 +2212,34 @@ strhandle(void)
 			}
 			return;
 		case 10:
-			if (narg < 2)
-				break;
-
-			p = strescseq.args[1];
-
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultfg, 10);
-			else if (xsetcolorname(defaultfg, p))
-				fprintf(stderr, "erresc: invalid foreground color: %s\n", p);
-			else
-				redraw();
-			return;
 		case 11:
-			if (narg < 2)
-				break;
-
-			p = strescseq.args[1];
-
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultbg, 11);
-			else if (xsetcolorname(defaultbg, p))
-				fprintf(stderr, "erresc: invalid background color: %s\n", p);
-			else
-				redraw();
-			return;
 		case 12:
 			if (narg < 2)
 				break;
-
 			p = strescseq.args[1];
+			if ((j = par - 10) < 0 || j >= LEN(osc_table))
+				break; /* shouldn't be possible */
 
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultcs, 12);
-			else if (xsetcolorname(defaultcs, p))
-				fprintf(stderr, "erresc: invalid cursor color: %s\n", p);
-			else
-				redraw();
+			if (!strcmp(p, "?")) {
+				osc_color_response(par, osc_table[j].idx, 0);
+			} else if (xsetcolorname(osc_table[j].idx, p)) {
+				fprintf(stderr, "erresc: invalid %s color: %s\n",
+				        osc_table[j].str, p);
+			} else {
+				tfulldirt();
+			}
 			return;
 		case 4: /* color set */
 			if (narg < 3)
 				break;
-			p = STRESCARGREST(2);
+			p = strescseq.args[2];
 			/* FALLTHROUGH */
 		case 104: /* color reset */
-			j = (narg > 1) ? atoi(STRESCARGREST(1)) : -1;
+			j = (narg > 1) ? atoi(strescseq.args[1]) : -1;
 
-			if (p && !strcmp(p, "?"))
-				osc4_color_response(j);
-			else if (xsetcolorname(j, p)) {
+			if (p && !strcmp(p, "?")) {
+				osc_color_response(j, 0, 1);
+			} else if (xsetcolorname(j, p)) {
 				if (par == 104 && narg <= 1)
 					return; /* color reset without parameter */
 				fprintf(stderr, "erresc: invalid color j=%d, p=%s\n",
@@ -2218,15 +2249,21 @@ strhandle(void)
 				 * TODO if defaultbg color is changed, borders
 				 * are dirty
 				 */
-				redraw();
+				tfulldirt();
 			}
 			return;
 		}
 		break;
 	case 'k': /* old title set compatibility */
-		xsettitle(STRESCARGREST(0));
+		xsettitle(strescseq.args[0], 0);
 		return;
 	case 'P': /* DCS -- Device Control String */
+		/* https://gitlab.com/gnachman/iterm2/-/wikis/synchronized-updates-spec */
+		if (strstr(strescseq.buf, "=1s") == strescseq.buf)
+			tsync_begin();  /* BSU */
+		else if (strstr(strescseq.buf, "=2s") == strescseq.buf)
+			tsync_end();  /* ESU */
+		return;
 	case '_': /* APC -- Application Program Command */
 	case '^': /* PM -- Privacy Message */
 		return;
@@ -2243,18 +2280,19 @@ strparse(void)
 	char *p = strescseq.buf;
 
 	strescseq.narg = 0;
+	strescseq.buf[strescseq.len] = '\0';
 
 	if (*p == '\0')
 		return;
 
 	while (strescseq.narg < STR_ARG_SIZ) {
-		while ((c = *p) != ';' && c != '\0')
-			p++;
 		strescseq.args[strescseq.narg++] = p;
+		while ((c = *p) != ';' && c != '\0')
+			++p;
 		if (c == '\0')
 			return;
-		p++;
-  }
+		*p++ = '\0';
+	}
 }
 
 void
@@ -2587,6 +2625,7 @@ eschandle(uchar ascii)
 		break;
 	case 'c': /* RIS -- Reset to initial state */
 		treset();
+		xfreetitlestack();
 		resettitle();
 		xloadcols();
 		break;
@@ -2765,6 +2804,9 @@ twrite(const char *buf, int buflen, int show_ctrl)
 	Rune u;
 	int n;
 
+	int su0 = su;
+	twrite_aborted = 0;
+
 	for (n = 0; n < buflen; n += charsize) {
 		if (IS_SET(MODE_UTF8)) {
 			/* process a complete utf8 char */
@@ -2774,6 +2816,10 @@ twrite(const char *buf, int buflen, int show_ctrl)
 		} else {
 			u = buf[n] & 0xFF;
 			charsize = 1;
+		}
+		if (su0 && !su) {
+			twrite_aborted = 1;
+			break;  // ESU - allow rendering before a new BSU
 		}
 		if (show_ctrl && ISCONTROL(u)) {
 			if (u & 0x80) {
@@ -3065,7 +3111,7 @@ tresizealt(int col, int row)
 void
 resettitle(void)
 {
-	xsettitle(NULL);
+	xsettitle(NULL, 0);
 }
 
 void
@@ -3115,121 +3161,89 @@ redraw(void)
 	draw();
 }
 
-void
-tsetcolor( int row, int start, int end, uint32_t fg, uint32_t bg )
+int
+daddch(URLdfa *dfa, char c)
 {
-	int i = start;
-	for( ; i < end; ++i )
-	{
-		term.line[row][i].fg = fg;
-		term.line[row][i].bg = bg;
-	}
-}
+	/* () and [] can appear in urls, but excluding them here will reduce false
+	 * positives when figuring out where a given url ends.
+	 */
+	static const char URLCHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"abcdefghijklmnopqrstuvwxyz"
+		"0123456789-._~:/?#@!$&'*+,;=%";
+	static const char RPFX[] = "//:sptth";
 
-char *
-findlastany(char *str, const char** find, size_t len)
-{
-	char* found = NULL;
-	int i = 0;
-	for(found = str + strlen(str) - 1; found >= str; --found) {
-		for(i = 0; i < len; i++) {
-			if(strncmp(found, find[i], strlen(find[i])) == 0) {
-				return found;
-			}
-		}
+	if (!strchr(URLCHARS, c)) {
+		dfa->length = 0;
+		dfa->state = 0;
+
+		return 0;
 	}
 
-	return NULL;
+	dfa->length++;
+
+	if (dfa->state == 2 && c == '/') {
+		dfa->state = 0;
+	} else if (dfa->state == 3 && c == 'p') {
+		dfa->state++;
+	} else if (c != RPFX[dfa->state]) {
+		dfa->state = 0;
+		return 0;
+	}
+
+	if (dfa->state++ == 7) {
+		dfa->state = 0;
+		return 1;
+	}
+
+	return 0;
 }
 
 /*
 ** Select and copy the previous url on screen (do nothing if there's no url).
-**
-** FIXME: doesn't handle urls that span multiple lines; will need to add support
-**        for multiline "getsel()" first
 */
 void
 copyurl(const Arg *arg) {
-	/* () and [] can appear in urls, but excluding them here will reduce false
-	 * positives when figuring out where a given url ends.
-	 */
-	static char URLCHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		"abcdefghijklmnopqrstuvwxyz"
-		"0123456789-._~:/?#@!$&'*+,;=%";
-
-	static const char* URLSTRINGS[] = {"http://", "https://"};
-
-	/* remove highlighting from previous selection if any */
-	if(sel.ob.x >= 0 && sel.oe.x >= 0)
-		tsetcolor(sel.nb.y, sel.ob.x, sel.oe.x + 1, defaultfg, defaultbg);
-
-	int i = 0,
-		row = 0, /* row of current URL */
+	int row = 0, /* row of current URL */
 		col = 0, /* column of current URL start */
-		startrow = 0, /* row of last occurrence */
 		colend = 0, /* column of last occurrence */
 		passes = 0; /* how many rows have been scanned */
 
-	char *linestr = calloc(term.col+1, sizeof(Rune));
-	char *c = NULL,
+	const char *c = NULL,
 		 *match = NULL;
+	URLdfa dfa = { 0 };
 
 	row = (sel.ob.x >= 0 && sel.nb.y > 0) ? sel.nb.y : term.bot;
 	LIMIT(row, term.top, term.bot);
-	startrow = row;
 
 	colend = (sel.ob.x >= 0 && sel.nb.y > 0) ? sel.nb.x : term.col;
 	LIMIT(colend, 0, term.col);
 
 	/*
- 	** Scan from (term.bot,term.col) to (0,0) and find
+	** Scan from (term.row - 1,term.col - 1) to (0,0) and find
 	** next occurrance of a URL
 	*/
-	while(passes !=term.bot + 2) {
+	for (passes = 0; passes < term.row; passes++) {
 		/* Read in each column of every row until
- 		** we hit previous occurrence of URL
+		** we hit previous occurrence of URL
 		*/
-		for (col = 0, i = 0; col < colend; ++col,++i) {
-			linestr[i] = term.line[row][col].u;
-		}
-		linestr[term.col] = '\0';
+		for (col = colend; col--;)
+			if (daddch(&dfa, term.line[row][col].u < 128 ? term.line[row][col].u : ' '))
+				break;
 
-		if ((match = findlastany(linestr, URLSTRINGS,
-						sizeof(URLSTRINGS)/sizeof(URLSTRINGS[0]))))
+		if (col >= 0)
 			break;
 
-		if (--row < term.top)
-			row = term.bot;
+		if (--row < 0)
+			row = term.row - 1;
 
 		colend = term.col;
-		passes++;
-	};
+	}
 
-	if (match) {
-		/* must happen before trim */
-		selclear();
-		sel.ob.x = strlen(linestr) - strlen(match);
-
-		/* trim the rest of the line from the url match */
-		for (c = match; *c != '\0'; ++c)
-			if (!strchr(URLCHARS, *c)) {
-				*c = '\0';
-				break;
-			}
-
-		/* highlight selection by inverting terminal colors */
-		tsetcolor(row, sel.ob.x, sel.ob.x + strlen( match ), defaultbg, defaultfg);
-
-		/* select and copy */
-		sel.mode = 1;
-		sel.type = SEL_REGULAR;
-		sel.oe.x = sel.ob.x + strlen(match)-1;
-		sel.ob.y = sel.oe.y = row;
-		selnormalize();
-		tsetdirt(sel.nb.y, sel.ne.y);
+	if (passes < term.row) {
+		selstart(col, row, 0);
+		selextend((col + dfa.length - 1) % term.col, row + (col + dfa.length - 1) / term.col, SEL_REGULAR, 0);
+		selextend((col + dfa.length - 1) % term.col, row + (col + dfa.length - 1) / term.col, SEL_REGULAR, 1);
 		xsetsel(getsel());
 		xclipcopy();
 	}
-
-	free(linestr);
 }

@@ -1,6 +1,15 @@
 = st - simple terminal
 chtc <notnotcha0t1c@protonmail.com>
 {docdate}
+ifndef::env-github[:icons: font]
+ifdef::env-github[]
+:status:
+:caution-caption: :fire:
+:important-caption: :exclamation:
+:note-caption: :paperclip:
+:tip-caption: :bulb:
+:warning-caption: :warning:
+endif::[]
 
 IMPORTANT:: Install https://github.com/uditkarode/libxft-bgra[libxft-bgra] to not have crashes when emojis are displayed.
 
@@ -12,8 +21,8 @@ In order to build st you need the Xlib header files.
 == Installation
 Clone the repository and enter the directory.
 [source,shell]
-git clone https://github.com/notchtc/dwm
-cd dwm
+git clone https://github.com/notchtc/st
+cd st
 
 Edit config.mk to match your local setup (st is installed into
 the /usr/local namespace by default).
@@ -24,14 +33,16 @@ necessary as root):
 make clean install
 
 == Patches
-- https://st.suckless.org/patches/anysize[anysize]
 - https://st.suckless.org/patches/bold-is-not-bright[bold is not bright]
 - https://st.suckless.org/patches/boxdraw[boxdraw]
+- https://st.suckless.org/patches/blinking_cursor[blinking cursor]
 - https://st.suckless.org/patches/clipboard[clipboard]
 - https://st.suckless.org/patches/copyurl[copyurl]
-- https://raw.githubusercontent.com/BeyondMagic/flarity/master/.patches/columns-rows-reflow-st-unpatched-new.patch[patch_column]
 - https://st.suckless.org/patches/font2[font2]
-- https://st.suckless.org/patches/xresources[xresources]
+- https://st.suckless.org/patches/open_copied_url[open copied url]
+- https://st.suckless.org/patches/scrollback[scrollback]
+- https://st.suckless.org/patches/sync[sync]
+- https://st.suckless.org/patches/xresources-with-reload-signal[xresources with signal reloading]
 
 == Running st
 If you did not install st with make clean install, you must compile
